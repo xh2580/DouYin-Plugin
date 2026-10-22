@@ -90,6 +90,8 @@ const adapter = new (class DouYinAdapter {
     )
     this.version = `${name} ${version}`
     this.logining = false
+    // 登录频控冷却截止时间戳：check_qrconnect error_code=7 后 10 分钟内拒绝新登录
+    this.loginCooldown = 0
     // 登录二次验证等待：{ kind: "sms"|"password", resolve, reject }，由验证码/密码指令消费
     this.mfaWait = null
     // 断线重连状态：各账号已重试次数 / 主动登出标记
@@ -2730,6 +2732,9 @@ export class DouYinAdapter extends plugin {
 
   async Login() {
     if (adapter.logining) return this.reply("已有登录流程进行中", true)
+    // 登录频控冷却：check_qrconnect error_code=7 后服务端持续限流，冷却期内重试只会续住频控
+    if (adapter.loginCooldown > Date.now())
+      return this.reply(`登录触发频控冷却，服务端限流一般 10-30 分钟解除，请 ${Math.ceil((adapter.loginCooldown - Date.now()) / 60000)} 分钟后再试`, true)
     adapter.logining = true
 
     try {
@@ -2778,6 +2783,21 @@ export class DouYinAdapter extends plugin {
       this.reply("账号连接失败", true)
       return false
     } catch (err) {
+      // 抖音服务端频控（error_code=7 访问太频繁）：多由短时间内反复扫码/发码重试、同 IP 多账号叠加请求触发，
+      // SDK 已按致命错误终止轮询；此处设置冷却并给出指引，避免立即重试加重限流
+      if (/error_code=7|访问太频繁/.test(String(err.message || err))) {
+        adapter.loginCooldown = Date.now() + 10 * 60000
+        this.reply(
+          [
+            "登录触发抖音服务端频控（访问太频繁）",
+            "常见原因：短时间内多次扫码重试、发验证码后请求过密、同 IP 多账号连接时叠加登录",
+            "服务端限流一般 10-30 分钟自行解除，已设置 10 分钟登录冷却",
+            "期间请勿反复扫码重试，冷却结束后再 #抖音bot登录",
+          ].join("\n"),
+          true,
+        )
+        return false
+      }
       this.reply(`登录失败：${err.message || err}`, true)
       return false
     } finally {
