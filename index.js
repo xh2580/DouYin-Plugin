@@ -50,7 +50,7 @@ function imageContentType(buf) {
   return "application/octet-stream"
 }
 
-const { config, configSave } = await makeConfig(
+export const { config, configSave } = await makeConfig(
   "DouYin",
   {
     tips: "",

@@ -48,12 +48,15 @@ pnpm install
 
 ## 配置说明
 
+安装 [Guoba 插件](https://github.com/guoba-yunzai/guoba-plugin) 后，可在 Web 管理面板「插件配置」中图形化管理本插件配置
+
 配置文件 `config/DouYin.yaml`：
 
 - `permission` 指令权限，默认 `master`
 - `bot.timeout` 请求超时时间（ms，默认 30000）
 - `bot.autoRead` 收到消息后自动标记已读（对方可见已读回执）
 - `bot.activeStatus` 上报在线状态（对方可见在线）
+- `bot.forwardToImage` 合并转发渲染为图片发送（默认开启，关闭则走 SDK 原生 forward 卡片）
 - `token` 账号列表，格式 `uid:cookie`
 
 令牌变更后无需重启，适配器会定时检测配置变化自动连接新账号、断开删除的账号
