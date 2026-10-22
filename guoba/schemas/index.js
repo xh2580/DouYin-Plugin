@@ -55,6 +55,20 @@ export const schemas = [
     help: "合并转发渲染为图片发送；关闭则走 SDK 原生 forward 卡片",
   },
   {
+    field: "bot.autoAcceptFriend",
+    label: "自动同意好友申请",
+    component: "Switch",
+    defaultValue: false,
+    help: "收到好友申请时自动通过，仍会推送事件",
+  },
+  {
+    field: "bot.autoAcceptGroup",
+    label: "自动同意入群申请",
+    component: "Switch",
+    defaultValue: false,
+    help: "收到入群申请时自动通过，仍会推送事件",
+  },
+  {
     component: "Divider",
     label: "账号设置",
   },

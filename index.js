@@ -64,6 +64,10 @@ export const { config, configSave } = await makeConfig(
       // 合并转发渲染为图片发送（默认开启）：抖音 forward 卡片需引用会话内真实消息，
       // 纯生成内容节点无真实消息 id 时预览/展开异常，转图片更稳定；关闭则走 SDK 原生 forward 卡片
       forwardToImage: true,
+      // 好友申请自动同意（默认关闭，仅对申请事件生效）
+      autoAcceptFriend: false,
+      // 入群申请自动同意（默认关闭，仅对申请事件生效）
+      autoAcceptGroup: false,
     },
     token: [],
   },
@@ -1559,6 +1563,22 @@ const adapter = new (class DouYinAdapter {
     } else {
       return
     }
+    // 自动同意开关：按配置自动通过申请，仍入列表并推送事件供其他插件感知
+    if (
+      (data.request_type === "friend" && config.bot.autoAcceptFriend) ||
+      (data.request_type === "group" && config.bot.autoAcceptGroup)
+    ) {
+      const ret = await data.approve().catch(err => {
+        Bot.makeLog("warn", ["自动同意申请失败", data.user_id, err], id)
+        return undefined
+      })
+      data.autoAccepted = !!ret
+      Bot.makeLog(
+        data.autoAccepted ? "mark" : "warn",
+        `自动同意${data.request_type === "friend" ? "好友" : "入群"}申请${data.autoAccepted ? "成功" : "失败"}：${data.user_id}`,
+        id,
+      )
+    }
     Bot[id].request_list.push(data)
     Bot.em(`request.${data.request_type}`, data)
   }
@@ -1880,6 +1900,15 @@ setInterval(() => {
   oldTokens = cur
 }, 30000).unref?.()
 
+// 近期经插件指令发出的消息（消息 id → 会话上下文），供 #抖音bot撤回 / #抖音bot发送记录 使用
+const sentRecall = new Map()
+function trackSent(bot, data, rets) {
+  for (const mid of rets.message_id) {
+    sentRecall.set(mid, { self_id: bot.uin, user_id: data.user_id, group_id: data.group_id, chatId: data.chatId, time: Date.now() })
+    if (sentRecall.size > 200) sentRecall.delete(sentRecall.keys().next().value)
+  }
+}
+
 export class DouYinAdapter extends plugin {
   constructor() {
     super({
@@ -1912,6 +1941,161 @@ export class DouYinAdapter extends plugin {
           fnc: "Del",
           permission: config.permission,
         },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot状态$|^#抖音bot状态$",
+          fnc: "Status",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot重连[0-9]*$|^#抖音bot重连[0-9]*$",
+          fnc: "Reconnect",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot好友列表[0-9]*$|^#抖音bot好友列表[0-9]*$",
+          fnc: "FriendList",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot群列表[0-9]*$|^#抖音bot群列表[0-9]*$",
+          fnc: "GroupList",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot查用户.+|^#抖音bot查用户.+",
+          fnc: "FindUser",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot发消息.+|^#抖音bot发消息.+",
+          fnc: "SendTo",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot发群消息.+|^#抖音bot发群消息.+",
+          fnc: "SendGroupTo",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot帮助$|^#抖音bot帮助$|^#[Dd]ou[Yy]in[Bb]ot菜单$|^#抖音bot菜单$",
+          fnc: "Help",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot好友申请$|^#抖音bot好友申请$",
+          fnc: "FriendRequests",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot同意好友[0-9]+$|^#抖音bot同意好友[0-9]+$",
+          fnc: "ApproveFriend",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot拒绝好友[0-9]+$|^#抖音bot拒绝好友[0-9]+$",
+          fnc: "RejectFriend",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot入群申请[0-9]*$|^#抖音bot入群申请[0-9]*$",
+          fnc: "GroupRequests",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot同意入群[0-9]+$|^#抖音bot同意入群[0-9]+$",
+          fnc: "ApproveGroup",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot拒绝入群[0-9]+$|^#抖音bot拒绝入群[0-9]+$",
+          fnc: "RejectGroup",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot群资料[0-9]+$|^#抖音bot群资料[0-9]+$",
+          fnc: "GroupInfo",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot群成员[0-9]+(\\s+[0-9]+)?$|^#抖音bot群成员[0-9]+(\\s+[0-9]+)?$",
+          fnc: "GroupMembers",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot找群.+|^#抖音bot找群.+",
+          fnc: "GroupSearch",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot改群名[0-9]+.+|^#抖音bot改群名[0-9]+.+",
+          fnc: "SetGroupName",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot踢人[0-9]+.+|^#抖音bot踢人[0-9]+.+",
+          fnc: "KickMember",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot拉人[0-9]+.+|^#抖音bot拉人[0-9]+.+",
+          fnc: "InviteMembers",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot退群[0-9]+(\\s*确认)?$|^#抖音bot退群[0-9]+(\\s*确认)?$",
+          fnc: "QuitGroup",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot聊天记录[0-9]+(\\s+[0-9]+)?$|^#抖音bot聊天记录[0-9]+(\\s+[0-9]+)?$",
+          fnc: "ChatHistory",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot头像[0-9]+$|^#抖音bot头像[0-9]+$",
+          fnc: "Avatar",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot群头像[0-9]+$|^#抖音bot群头像[0-9]+$",
+          fnc: "GroupAvatar",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot撤回[0-9]+(\\s+[0-9]+)?$|^#抖音bot撤回[0-9]+(\\s+[0-9]+)?$",
+          fnc: "RecallSent",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot发送记录$|^#抖音bot发送记录$",
+          fnc: "SentLog",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot陌生人$|^#抖音bot陌生人$",
+          fnc: "Strangers",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot发图片.+|^#抖音bot发图片.+",
+          fnc: "SendImage",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot群发图片.+|^#抖音bot群发图片.+",
+          fnc: "SendGroupImage",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot拨打语音[0-9]+$|^#抖音bot拨打语音[0-9]+$",
+          fnc: "CallVoice",
+          permission: config.permission,
+        },
+        {
+          reg: "^#[Dd]ou[Yy]in[Bb]ot正在输入[0-9]+$|^#抖音bot正在输入[0-9]+$",
+          fnc: "SendTyping",
+          permission: config.permission,
+        },
       ],
     })
   }
@@ -1919,6 +2103,627 @@ export class DouYinAdapter extends plugin {
   List() {
     this.reply(
       `共${config.token.length}个账号：\n${config.token.map(i => i.split(/:(.+)/s)[0]).join("\n")}`,
+      true,
+    )
+  }
+
+  /** 选定操作账号：优先事件来源账号，stdin 等场景回退第一个已连接账号 */
+  botOf() {
+    const self = Bot[this.e.self_id]
+    if (self?.sdk) return self
+    for (const token of config.token) {
+      const b = Bot[token.split(/:(.+)/s)[0]]
+      if (b?.sdk) return b
+    }
+    return undefined
+  }
+
+  /** 秒数转「X时Y分Z秒」 */
+  fmtDuration(sec) {
+    const h = Math.floor(sec / 3600)
+    const m = Math.floor((sec % 3600) / 60)
+    const s = Math.floor(sec % 60)
+    return `${h}时${m}分${s}秒`
+  }
+
+  async Status() {
+    if (!config.token.length) return this.reply("暂无账号，请先使用 #抖音bot登录 扫码登录", true)
+    const lines = [`DouYin 适配器（${adapter.version}）账号状态：`]
+    for (const token of config.token) {
+      const id = token.split(/:(.+)/s)[0]
+      const b = Bot[id]
+      if (!b) {
+        lines.push(`\n▪ ${id}：离线（未连接或 cookie 已失效，请重新登录）`)
+        continue
+      }
+      lines.push(
+        [
+          `\n▪ ${id}（${b.nickname}）：在线`,
+          `运行时长：${this.fmtDuration(Date.now() / 1000 - b.stat.start_time)}`,
+          `收发消息：收 ${b.stat.recv_msg_cnt} / 发 ${b.stat.sent_msg_cnt}`,
+        ].join("\n"),
+      )
+    }
+    const retry = Object.entries(adapter.reconnects).filter(([, n]) => n)
+    if (retry.length) lines.push(`\n重连重试中：${retry.map(([id, n]) => `${id}（${n}次）`).join("、")}`)
+    return this.reply(lines.join("\n"), true)
+  }
+
+  async Reconnect() {
+    const id = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot重连|^#抖音bot重连/, "").trim()
+    if (id) {
+      const token = config.token.find(i => i.startsWith(`${id}:`))
+      if (!token) return this.reply(`账号 ${id} 不存在`, true)
+      this.reply(`正在重连账号 ${id}...`, true)
+      const ok = await adapter.connect(token)
+      return this.reply(ok ? `账号 ${id} 重连成功` : `账号 ${id} 重连失败，请检查日志或重新登录`, true)
+    }
+    if (!config.token.length) return this.reply("暂无账号", true)
+    this.reply(`正在重连全部 ${config.token.length} 个账号...`, true)
+    const rets = await Promise.allSettled(config.token.map(token => adapter.connect(token)))
+    const ok = rets.filter(i => i.status === "fulfilled" && i.value).length
+    return this.reply(`重连完成：成功 ${ok} / 共 ${config.token.length}`, true)
+  }
+
+  async FriendList() {
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const page = Math.max(1, Number(this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot好友列表|^#抖音bot好友列表/, "").trim()) || 1)
+    const friends = bot.getFriendArray()
+    if (!friends.length) return this.reply("账号暂无好友或列表尚未加载完成", true)
+    const size = 50
+    const pages = Math.ceil(friends.length / size)
+    if (page > pages) return this.reply(`共 ${pages} 页，请输入 1-${pages} 之间的页码`, true)
+    const lines = friends
+      .slice((page - 1) * size, page * size)
+      .map(i => `${i.user_id} ${i.nickname}${i.uniqueId ? `（抖音号 ${i.uniqueId}）` : ""}`)
+    return this.reply(`共 ${friends.length} 个好友，第 ${page}/${pages} 页：\n${lines.join("\n")}`)
+  }
+
+  async GroupList() {
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const page = Math.max(1, Number(this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot群列表|^#抖音bot群列表/, "").trim()) || 1)
+    const groups = bot.getGroupArray()
+    if (!groups.length) return this.reply("账号暂无群聊或列表尚未加载完成", true)
+    const size = 50
+    const pages = Math.ceil(groups.length / size)
+    if (page > pages) return this.reply(`共 ${pages} 页，请输入 1-${pages} 之间的页码`, true)
+    const lines = groups
+      .slice((page - 1) * size, page * size)
+      .map(i => `${i.group_id} ${i.group_name}${i.member_count ? `（${i.member_count}人）` : ""}`)
+    return this.reply(`共 ${groups.length} 个群聊，第 ${page}/${pages} 页：\n${lines.join("\n")}`)
+  }
+
+  async FindUser() {
+    const key = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot查用户|^#抖音bot查用户/, "").trim()
+    if (!key) return this.reply("用法：#抖音bot查用户 <uid|抖音号|短号|昵称>", true)
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+
+    let f = bot.fl.get(key)
+    if (!f)
+      for (const i of bot.fl.values())
+        if (i.uniqueId === key || i.shortId === key || i.nickname === key) {
+          f = i
+          break
+        }
+    if (!f) {
+      // 精确匹配失败时昵称模糊兜底，多命中仅提示候选
+      const hit = [...bot.fl.values()].filter(i => i.nickname?.includes(key))
+      if (!hit.length) return this.reply(`未找到「${key}」对应的用户`, true)
+      if (hit.length > 1)
+        return this.reply(
+          `匹配到 ${hit.length} 个用户，请精确输入：\n${hit.slice(0, 5).map(i => `${i.user_id} ${i.nickname}`).join("\n")}`,
+        )
+      f = hit[0]
+    }
+
+    // 有 secUid 时拉实时资料补全签名/抖音号，失败回落缓存
+    let profile
+    if (f.secUid) {
+      try {
+        ;[profile] = await bot.sdk.user.info([f.secUid])
+      } catch {}
+    }
+    const info = { ...f, ...profile }
+    return this.reply(
+      [
+        "用户信息：",
+        `昵称：${info.nickname}`,
+        `uid：${info.user_id || f.uid}`,
+        info.uniqueId ? `抖音号：${info.uniqueId}` : undefined,
+        info.shortId ? `短号：${info.shortId}` : undefined,
+        info.signature ? `签名：${info.signature}` : undefined,
+        info.secUid ? `secUid：${info.secUid}` : undefined,
+      ]
+        .filter(s => s !== undefined)
+        .join("\n"),
+      true,
+    )
+  }
+
+  async SendTo() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot发消息|^#抖音bot发消息/, "").trim()
+    const match = raw.match(/^([0-9]+)[\s\n]+([\s\S]+)/)
+    if (!match) return this.reply("用法：#抖音bot发消息 uid 内容", true)
+    const [, uid, text] = match
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.fl.has(uid)) return this.reply(`账号 ${bot.uin} 的好友列表中不存在 ${uid}，可先 #抖音bot查用户${uid} 确认`, true)
+    const ret = await bot.pickFriend(uid).sendMsg(text)
+    if (!ret || ret.error?.length) return this.reply(`发送失败：${ret?.error?.[0]?.message || "未知错误"}`, true)
+    trackSent(bot, { ...bot.fl.get(uid), user_id: uid }, ret)
+    const mid = ret.message_id?.[0]
+    return this.reply(`已向 ${uid} 发送消息${mid ? `（消息id：${mid}，可用 #抖音bot撤回 撤回）` : ""}`, true)
+  }
+
+  async SendGroupTo() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot发群消息|^#抖音bot发群消息/, "").trim()
+    const match = raw.match(/^([0-9]+)[\s\n]+([\s\S]+)/)
+    if (!match) return this.reply("用法：#抖音bot发群消息 群号 内容", true)
+    const [, gid, text] = match
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.gl.has(gid)) return this.reply(`账号 ${bot.uin} 的群列表中不存在 ${gid}，可先 #抖音bot群列表 确认`, true)
+    const ret = await bot.pickGroup(gid).sendMsg(text)
+    if (!ret || ret.error?.length) return this.reply(`发送失败：${ret?.error?.[0]?.message || "未知错误"}`, true)
+    trackSent(bot, { ...bot.gl.get(gid), group_id: gid }, ret)
+    const mid = ret.message_id?.[0]
+    return this.reply(`已向群 ${gid} 发送消息${mid ? `（消息id：${mid}，可用 #抖音bot撤回 撤回）` : ""}`, true)
+  }
+
+  /** 解析「数字id [数字参数]」形态，返回 [id, 参数] */
+  parseIds(str) {
+    const m = String(str).trim().match(/^([0-9]+)(?:[\s\n]+([0-9]+))?/)
+    return m ? [m[1], m[2]] : []
+  }
+
+  async FriendRequests() {
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    let list
+    try {
+      // status 1 为待处理（与入群申请一致）
+      list = await bot.sdk.frd.requests(1)
+    } catch {}
+    // SDK 通道失败或返回异常时，回落运行期事件累积的申请列表
+    if (!Array.isArray(list))
+      list = bot.request_list
+        .filter(i => i.request_type === "friend")
+        .map(i => ({ applicantUid: i.user_id, applicantNickname: i.nickname, content: i.comment }))
+    list = list.filter(i => i.status === undefined || i.status === 1)
+    if (!list.length) return this.reply("暂无待处理的好友申请", true)
+    const lines = list
+      .slice(0, 20)
+      .map(i => `${i.applicantUid} ${i.applicantNickname || ""}${i.content ? `：${i.content}` : ""}`)
+    return this.reply(
+      `共 ${list.length} 条好友申请${list.length > 20 ? "（仅显示前 20 条）" : ""}：\n${lines.join("\n")}\n处理：#抖音bot同意好友/拒绝好友uid`,
+      true,
+    )
+  }
+
+  async handleFriendRequest(approve) {
+    const uid = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot(同意|拒绝)好友|^#抖音bot(同意|拒绝)好友/, "").trim()
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    try {
+      const ret = approve ? await bot.approveFriend(uid) : await bot.rejectFriend(uid)
+      if (!ret) return this.reply(`处理失败：${uid}（申请可能已失效）`, true)
+      // 同意后刷新好友列表缓存
+      if (approve) adapter.loadFriend(bot.uin).catch(() => {})
+      return this.reply(`已${approve ? "同意" : "拒绝"}好友申请：${uid}`, true)
+    } catch (err) {
+      return this.reply(`处理失败：${err.message || err}`, true)
+    }
+  }
+
+  async ApproveFriend() {
+    return this.handleFriendRequest(true)
+  }
+
+  async RejectFriend() {
+    return this.handleFriendRequest(false)
+  }
+
+  async GroupRequests() {
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const gid = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot入群申请|^#抖音bot入群申请/, "").trim()
+    let list = []
+    if (gid) {
+      if (!bot.gl.has(gid)) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+      // 与 makeRequest 一致：入群申请按群（conversationShortId）查询，仅取待处理（status 1）
+      list = (await bot.sdk.grp.requests(gid).catch(() => [])) || []
+      list = list.filter(i => i.status === 1)
+    } else {
+      // 未指定群号时展示运行期收到的申请
+      list = bot.request_list
+        .filter(i => i.request_type === "group")
+        .map(i => ({ requestId: i.raw?.requestId, applicantUid: i.user_id, applicantNickname: i.nickname, content: i.comment }))
+    }
+    if (!list.length)
+      return this.reply(gid ? `群 ${gid} 暂无待处理的入群申请` : "暂无入群申请记录，指定群号可查询全量待处理列表：#抖音bot入群申请<群号>", true)
+    const lines = list
+      .slice(0, 20)
+      .map(i => `${i.requestId || "?"} ${i.applicantUid || "?"} ${i.applicantNickname || ""}${i.content ? `：${i.content}` : ""}`)
+    return this.reply(
+      `共 ${list.length} 条入群申请${list.length > 20 ? "（仅显示前 20 条）" : ""}：\n${lines.join("\n")}\n处理：#抖音bot同意入群/拒绝入群requestId`,
+      true,
+    )
+  }
+
+  async handleGroupRequest(approve) {
+    const requestId = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot(同意|拒绝)入群|^#抖音bot(同意|拒绝)入群/, "").trim()
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    try {
+      const ret = approve ? await bot.approveGroup(requestId) : await bot.rejectGroup(requestId)
+      if (!ret) return this.reply(`处理失败：${requestId}（申请可能已失效）`, true)
+      return this.reply(`已${approve ? "同意" : "拒绝"}入群申请：${requestId}`, true)
+    } catch (err) {
+      return this.reply(`处理失败：${err.message || err}`, true)
+    }
+  }
+
+  async ApproveGroup() {
+    return this.handleGroupRequest(true)
+  }
+
+  async RejectGroup() {
+    return this.handleGroupRequest(false)
+  }
+
+  async GroupInfo() {
+    const [gid] = this.parseIds(this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot群资料|^#抖音bot群资料/, ""))
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!gid || !bot.gl.has(gid)) return this.reply("用法：#抖音bot群资料 群号", true)
+    const info = await bot.pickGroup(gid).getInfo().catch(err => (Bot.makeLog("warn", ["群资料获取失败", err], bot.uin), undefined))
+    if (!info?.group_id) return this.reply("群资料获取失败", true)
+    const ownerNick = bot.fl.get(info.ownerUid)?.nickname || bot.gml.get(gid)?.get(info.ownerUid)?.nickname
+    return this.reply(
+      [
+        "群资料：",
+        `群号：${gid}`,
+        `名称：${info.group_name || "未知"}`,
+        info.member_count ? `成员数：${info.member_count}` : undefined,
+        info.ownerUid ? `群主：${info.ownerUid}${ownerNick ? `（${ownerNick}）` : ""}` : undefined,
+      ]
+        .filter(s => s !== undefined)
+        .join("\n"),
+      true,
+    )
+  }
+
+  async GroupMembers() {
+    const [gid, pageArg] = this.parseIds(this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot群成员|^#抖音bot群成员/, ""))
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!gid || !bot.gl.has(gid)) return this.reply("用法：#抖音bot群成员 群号 [页码]", true)
+    const chatId = bot.gl.get(gid)?.chatId
+    let members = await bot.sdk.grp.members(chatId).catch(err => (Bot.makeLog("warn", ["群成员列表获取失败", err], bot.uin), undefined))
+    // 实时列表失败时回落 gml 缓存
+    if (!Array.isArray(members) || !members.length) {
+      members = [...(bot.gml.get(gid)?.values() || [])]
+      if (!members.length) return this.reply("群成员列表获取失败", true)
+    }
+    // 成员列表（605）不含昵称：优先 gml/fl 缓存，缺昵称的按 secUid 批量补全（50/批）并落库
+    const gml = bot.gml.get(gid)
+    const infoMap = await adapter.fetchUserInfo(
+      bot.uin,
+      members.filter(i => i.secUid && !gml?.get(i.uid)?.nickname && !bot.fl.get(i.uid)?.nickname).map(i => i.secUid),
+    )
+    const rows = members.map(i => {
+      const cached = gml?.get(i.uid)
+      const u = infoMap.get(i.secUid)
+      return { user_id: i.uid, nickname: cached?.nickname || bot.fl.get(i.uid)?.nickname || u?.nickname || i.uid, role: i.role ?? cached?.role }
+    })
+    if (gml)
+      for (const [idx, m] of members.entries())
+        if (m.secUid && !gml.get(m.uid)?.nickname)
+          await gml
+            .set(m.uid, { ...gml.get(m.uid), user_id: m.uid, secUid: m.secUid, nickname: rows[idx].nickname, role: m.role ?? gml.get(m.uid)?.role })
+            .catch(() => {})
+    const page = Math.max(1, Number(pageArg) || 1)
+    const size = 50
+    const pages = Math.ceil(rows.length / size)
+    if (page > pages) return this.reply(`共 ${pages} 页，请输入 1-${pages} 之间的页码`, true)
+    const roleText = { 1: "群主", 2: "管理员", 3: "管理员" }
+    const lines = rows.slice((page - 1) * size, page * size).map(i => `${i.user_id} ${i.nickname}${roleText[i.role] ? `（${roleText[i.role]}）` : ""}`)
+    return this.reply(`群 ${gid} 共 ${rows.length} 名成员，第 ${page}/${pages} 页：\n${lines.join("\n")}`)
+  }
+
+  async GroupSearch() {
+    const key = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot找群|^#抖音bot找群/, "").trim()
+    if (!key) return this.reply("用法：#抖音bot找群 <群名关键词>", true)
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const hit = bot.getGroupArray().filter(i => i.group_name?.includes(key))
+    if (!hit.length) return this.reply(`未找到群名包含「${key}」的群`, true)
+    const lines = hit.slice(0, 20).map(i => `${i.group_id} ${i.group_name}`)
+    return this.reply(`匹配到 ${hit.length} 个群${hit.length > 20 ? "（仅显示前 20 个）" : ""}：\n${lines.join("\n")}`, true)
+  }
+
+  async SetGroupName() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot改群名|^#抖音bot改群名/, "").trim()
+    const m = raw.match(/^([0-9]+)[\s\n]*([\s\S]+)/)
+    if (!m) return this.reply("用法：#抖音bot改群名 群号 新群名", true)
+    const [, gid, name] = m
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.gl.has(gid)) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+    try {
+      const ret = await bot.pickGroup(gid).setGroupName(name)
+      if (ret?.statusCode !== 0) return this.reply(`改名失败：${ret?.statusMsg || ret?.statusCode || "未知错误"}（需群主/管理员权限）`, true)
+      return this.reply(`已将群 ${gid} 改名为「${name}」`, true)
+    } catch (err) {
+      return this.reply(`改名失败：${err.message || err}（需群主/管理员权限）`, true)
+    }
+  }
+
+  async KickMember() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot踢人|^#抖音bot踢人/, "").trim()
+    const m = raw.match(/^([0-9]+)[\s\n]+([0-9]+)$/)
+    if (!m) return this.reply("用法：#抖音bot踢人 群号 uid", true)
+    const [, gid, uid] = m
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const chatId = bot.gl.get(gid)?.chatId
+    if (!chatId) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+    try {
+      const ret = await bot.sdk.grp.removeMembers(chatId, [uid])
+      if (ret?.statusCode !== undefined && ret.statusCode !== 0)
+        return this.reply(`踢出失败：${ret.statusMsg || ret.statusCode}（需群主/管理员权限）`, true)
+      return this.reply(`已将 ${uid} 移出群 ${gid}`, true)
+    } catch (err) {
+      return this.reply(`踢出失败：${err.message || err}（需群主/管理员权限）`, true)
+    }
+  }
+
+  async InviteMembers() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot拉人|^#抖音bot拉人/, "").trim()
+    const m = raw.match(/^([0-9]+)[\s\n]+([0-9][0-9,，、\s\n]*)$/)
+    if (!m) return this.reply("用法：#抖音bot拉人 群号 uid[,uid...]", true)
+    const [, gid, uidStr] = m
+    const uids = uidStr.split(/[,，、\s\n]+/).filter(Boolean)
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const chatId = bot.gl.get(gid)?.chatId
+    if (!chatId) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+    try {
+      const ret = await bot.addGroupMembers(chatId, uids)
+      if (ret?.statusCode !== undefined && ret.statusCode !== 0)
+        return this.reply(`邀请失败：${ret.statusMsg || ret.statusCode}`, true)
+      return this.reply(`已向群 ${gid} 邀请 ${uids.length} 名成员`, true)
+    } catch (err) {
+      return this.reply(`邀请失败：${err.message || err}`, true)
+    }
+  }
+
+  async QuitGroup() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot退群|^#抖音bot退群/, "").trim()
+    const m = raw.match(/^([0-9]+)\s*(确认)?$/)
+    if (!m) return this.reply("用法：#抖音bot退群 群号 确认", true)
+    const [, gid, sure] = m
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.gl.has(gid)) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+    if (!sure)
+      return this.reply(
+        `将退出群 ${gid}（${bot.gl.get(gid)?.group_name || "未知群名"}），退群后本号无法再接收该群消息，请回复 #抖音bot退群${gid} 确认`,
+        true,
+      )
+    try {
+      await bot.pickGroup(gid).quit()
+      // 退群后从缓存移除，等待下次刷新同步
+      await bot.gl.delete(gid).catch(() => {})
+      return this.reply(`已退出群 ${gid}`, true)
+    } catch (err) {
+      return this.reply(`退群失败：${err.message || err}`, true)
+    }
+  }
+
+  async ChatHistory() {
+    const [id, cntArg] = this.parseIds(this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot聊天记录|^#抖音bot聊天记录/, ""))
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!id) return this.reply("用法：#抖音bot聊天记录 uid/群号 [条数]", true)
+    const isGroup = bot.gl.has(id)
+    if (!isGroup && !bot.fl.has(id)) return this.reply(`${id} 不在好友/群列表中，可先 #抖音bot群列表 或 #抖音bot好友列表 确认`, true)
+    const cnt = Math.min(20, Math.max(1, Number(cntArg) || 10))
+    const msgs = await (isGroup ? bot.pickGroup(id) : bot.pickFriend(id))
+      .getChatHistory(cnt)
+      .catch(err => (Bot.makeLog("warn", ["聊天记录获取失败", err], bot.uin), undefined))
+    if (!msgs?.length) return this.reply("聊天记录获取失败或暂无记录", true)
+    const lines = msgs.map(i => {
+      const nick = bot.fl.get(i.user_id)?.nickname || bot.gml.get(id)?.get(i.user_id)?.nickname || i.user_id
+      const time = i.time ? `[${new Date(i.time * 1000).toLocaleString("zh-CN", { hour12: false })}] ` : ""
+      return `${time}${nick}：${i.raw_message || "[空消息]"}`
+    })
+    return this.reply(`最近 ${msgs.length} 条记录${isGroup ? `（群 ${id}）` : ""}：\n${lines.join("\n")}`)
+  }
+
+  async Avatar() {
+    const uid = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot头像|^#抖音bot头像/, "").trim()
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.fl.has(uid)) return this.reply(`好友 ${uid} 不在列表中，可先 #抖音bot好友列表 确认`, true)
+    const url = await bot.pickFriend(uid).getAvatarUrl().catch(() => undefined)
+    if (!url) return this.reply("头像获取失败", true)
+    return this.reply([`用户 ${uid} 头像：`, segment.image(url)], true)
+  }
+
+  async GroupAvatar() {
+    const gid = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot群头像|^#抖音bot群头像/, "").trim()
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.gl.has(gid)) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+    const url = bot.pickGroup(gid).getAvatarUrl()
+    if (!url) return this.reply("群头像尚未缓存，可先 #抖音bot群资料<群号> 拉取后再试", true)
+    return this.reply([`群 ${gid} 头像：`, segment.image(url)], true)
+  }
+
+  async RecallSent() {
+    const [a, b] = this.parseIds(this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot撤回|^#抖音bot撤回/, ""))
+    if (!a) return this.reply("用法：#抖音bot撤回 消息id，或 #抖音bot撤回 uid/群号 消息id", true)
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    let mid = a
+    let data
+    if (b) {
+      // 指定会话：uid/群号 + 消息id
+      const chatId = bot.fl.get(a)?.chatId || bot.gl.get(a)?.chatId
+      if (!chatId) return this.reply(`${a} 不在好友/群列表中，无法定位会话`, true)
+      data = {
+        bot,
+        self_id: bot.uin,
+        ...(bot.gl.has(a) ? { group_id: a } : { user_id: a }),
+        chatId,
+      }
+      mid = b
+    } else {
+      const rec = sentRecall.get(mid)
+      if (!rec)
+        return this.reply(`未找到消息 ${mid} 的发送记录，仅支持撤回本插件指令发送的消息（保留最近 200 条），或指定会话：#抖音bot撤回 uid 消息id`, true)
+      const owner = Bot[rec.self_id]
+      if (!owner?.sdk) return this.reply("消息所属账号已离线，无法撤回", true)
+      data = { bot: owner, ...rec }
+    }
+    const rets = await adapter.recallMsg(data, mid)
+    if (!rets?.[0]) return this.reply(`撤回失败：${mid}（可能超出时限或无权限）`, true)
+    sentRecall.delete(mid)
+    return this.reply(`已撤回消息 ${mid}`, true)
+  }
+
+  async SentLog() {
+    if (!sentRecall.size) return this.reply("暂无经指令发送的消息记录", true)
+    const lines = [...sentRecall.entries()]
+      .slice(-20)
+      .reverse()
+      .map(
+        ([mid, r]) =>
+          `${mid} → ${r.group_id ? `群 ${r.group_id}` : `好友 ${r.user_id}`}（${new Date(r.time).toLocaleString("zh-CN", { hour12: false })}）`,
+      )
+    return this.reply(
+      `共 ${sentRecall.size} 条发送记录（最近 20 条）：\n${lines.join("\n")}\n撤回：#抖音bot撤回<消息id>`,
+      true,
+    )
+  }
+
+  async Strangers() {
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const list = await bot.getStrangers().catch(() => undefined)
+    if (!Array.isArray(list)) return this.reply("陌生人列表获取失败", true)
+    if (!list.length) return this.reply("暂无陌生人会话", true)
+    const lines = list
+      .slice(0, 20)
+      .map(i => `${i.uid || i.userId || i.user_id || "?"} ${i.nickname || ""}`.trim())
+    return this.reply(
+      `共 ${list.length} 个陌生人${list.length > 20 ? "（仅显示前 20 个）" : ""}：\n${lines.join("\n")}`,
+      true,
+    )
+  }
+
+  async SendImage() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot发图片|^#抖音bot发图片/, "").trim()
+    const m = raw.match(/^([0-9]+)[\s\n]+(\S+)/)
+    if (!m) return this.reply("用法：#抖音bot发图片 uid 图片链接", true)
+    const [, uid, url] = m
+    if (!/^https?:\/\//i.test(url)) return this.reply("仅支持 http(s) 图片链接", true)
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.fl.has(uid)) return this.reply(`好友 ${uid} 不在列表中，可先 #抖音bot好友列表 确认`, true)
+    const ret = await bot.pickFriend(uid).sendMsg([segment.image(url)])
+    if (!ret || ret.error?.length) return this.reply(`发送失败：${ret?.error?.[0]?.message || "未知错误"}`, true)
+    trackSent(bot, { ...bot.fl.get(uid), user_id: uid }, ret)
+    return this.reply(`已向 ${uid} 发送图片`, true)
+  }
+
+  async SendGroupImage() {
+    const raw = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot群发图片|^#抖音bot群发图片/, "").trim()
+    const m = raw.match(/^([0-9]+)[\s\n]+(\S+)/)
+    if (!m) return this.reply("用法：#抖音bot群发图片 群号 图片链接", true)
+    const [, gid, url] = m
+    if (!/^https?:\/\//i.test(url)) return this.reply("仅支持 http(s) 图片链接", true)
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    if (!bot.gl.has(gid)) return this.reply(`群 ${gid} 不在群列表中，可先 #抖音bot群列表 确认`, true)
+    const ret = await bot.pickGroup(gid).sendMsg([segment.image(url)])
+    if (!ret || ret.error?.length) return this.reply(`发送失败：${ret?.error?.[0]?.message || "未知错误"}`, true)
+    trackSent(bot, { ...bot.gl.get(gid), group_id: gid }, ret)
+    return this.reply(`已向群 ${gid} 发送图片`, true)
+  }
+
+  async CallVoice() {
+    const uid = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot拨打语音|^#抖音bot拨打语音/, "").trim()
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const chatId = bot.fl.get(uid)?.chatId
+    if (!chatId) return this.reply(`好友 ${uid} 不在列表中或无会话信息`, true)
+    try {
+      await bot.callVoice(chatId, uid)
+      return this.reply(`已向 ${uid} 发起语音通话邀请`, true)
+    } catch (err) {
+      return this.reply(`语音通话发起失败：${err.message || err}`, true)
+    }
+  }
+
+  async SendTyping() {
+    const uid = this.e.msg.replace(/^#[Dd]ou[Yy]in[Bb]ot正在输入|^#抖音bot正在输入/, "").trim()
+    const bot = this.botOf()
+    if (!bot) return this.reply("暂无在线账号", true)
+    const chatId = bot.fl.get(uid)?.chatId
+    if (!chatId) return this.reply(`好友 ${uid} 不在列表中或无会话信息`, true)
+    try {
+      await bot.sendTyping(chatId, true)
+      return this.reply(`已向 ${uid} 展示「正在输入」状态`, true)
+    } catch (err) {
+      return this.reply(`发送输入状态失败：${err.message || err}`, true)
+    }
+  }
+
+  Help() {
+    return this.reply(
+      [
+        "DouYin 适配器指令：",
+        "—— 账号 ——",
+        "#抖音bot账号 查看账号列表",
+        "#抖音bot登录 扫码登录账号",
+        "#抖音bot状态 查看在线状态与收发统计",
+        "#抖音bot重连[uid] 重连指定或全部账号",
+        "#抖音bot删除uid 删除账号并断开连接",
+        "—— 列表查询 ——",
+        "#抖音bot好友列表[页码] 查看好友列表",
+        "#抖音bot群列表[页码] 查看群列表",
+        "#抖音bot群成员<群号>[页码] 查看群成员",
+        "#抖音bot群资料<群号> 查看群资料",
+        "#抖音bot查用户<uid|抖音号|昵称> 查询用户信息",
+        "#抖音bot找群<群名关键词> 搜索群聊",
+        "#抖音bot头像<uid> / 群头像<群号> 查看头像",
+        "#抖音bot聊天记录<uid|群号>[条数] 查看聊天记录",
+        "#抖音bot陌生人 查看陌生人会话",
+        "—— 消息 ——",
+        "#抖音bot发消息<uid><内容> 给好友发消息",
+        "#抖音bot发群消息<群号><内容> 给群发消息",
+        "#抖音bot发图片<uid><链接> / 群发图片<群号><链接>",
+        "#抖音bot撤回<消息id> 撤回已发送消息",
+        "#抖音bot发送记录 查看近期发送记录",
+        "—— 申请 ——",
+        "#抖音bot好友申请 / 入群申请[群号] 查看申请",
+        "#抖音bot同意好友/拒绝好友<uid> 处理好友申请",
+        "#抖音bot同意入群/拒绝入群<requestId> 处理入群申请",
+        "—— 群管理 ——",
+        "#抖音bot改群名<群号><名称> 修改群名",
+        "#抖音bot踢人<群号><uid> 移出成员",
+        "#抖音bot拉人<群号><uid,uid> 邀请成员",
+        "#抖音bot退群<群号>确认 退出群聊",
+        "—— 其他 ——",
+        "#抖音bot拨打语音<uid> 发起语音通话",
+        "#抖音bot正在输入<uid> 展示输入状态",
+        "#抖音bot更新 / 更新日志 更新插件",
+      ].join("\n"),
       true,
     )
   }
